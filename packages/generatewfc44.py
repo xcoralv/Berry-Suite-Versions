@@ -84,9 +84,7 @@ class WfcGenerator:
                 self._wfck2r(self.nk_points, self.bands, 1)
 
         self.logger.info("\n\tRemoving temporary file 'tmp'")
-#        os.system(f"rm {os.getcwd()}/tmp")
         self.logger.info(f"\tRemoving quantum expresso output file '{m.wfck2r}'")
-#        os.system(f"rm {os.path.join(os.getcwd(),m.wfck2r)}")
 
         self.logger.footer()
 
@@ -110,7 +108,6 @@ class WfcGenerator:
         return self.byte_entropy(arr.tobytes())
 
 
-
     def _log_run_params(self):
         self.logger.info(f"\tUnique reference of run: {self.ref_name}")
         self.logger.info(f"\tWavefunctions will be saved in directory {m.wfcdirectory}")
@@ -128,18 +125,13 @@ class WfcGenerator:
         tmp_dir = os.path.join(os.getcwd(), f"tmp_nk{nk_point}")
         os.makedirs(tmp_dir, exist_ok=True)
 
-#        with TemporaryDirectory(prefix=f"tmp_nk{nk_point}_", dir=os.getcwd()) as tmp_dir: 
         try:
             # Set the command to run
             self.logger.info(f"\tCalculating wfc for k-point {nk_point}")
-#            self.tmp_dir = f"{os.getcwd()}/tmp_nk{nk_point}"
-#            os.makedirs(self.tmp_dir, exist_ok=True)
-
             shell_cmd = self._get_command(nk_point, initial_band, number_of_bands, tmp_dir)
 
             # Runs the command
             output = subprocess.check_output(shell_cmd, shell=True, cwd=tmp_dir)
-
 
             print(len(output))
             # Converts fortran complex numbers to numpy format
@@ -192,7 +184,7 @@ class WfcGenerator:
                 psi_rpoint = np.array([psi[int(m.rpoint) + m.nr * i] for i in range(number_of_bands)])
                 # Calculate the phase at rpoint for all the bands
                 deltaphase = np.arctan2(psi_rpoint.imag, psi_rpoint.real)
-                # print('PSI DELTA PHASE:', deltaphase)
+
                 # and the modulus of the wavefunction at the reference point rpoint (
                 # will be used to verify if the wavefunction at rpoint is significantly different from zero)
                 mod_rpoint = np.absolute(psi_rpoint)
@@ -206,7 +198,7 @@ class WfcGenerator:
                     psifinal += list(psi[i * m.nr : (i + 1) * m.nr] * np.exp(-1j * deltaphase[i]))
                 
                 psifinal = np.array(psifinal)
-                print('type psifinal', psifinal.dtype)
+        #        print('type psifinal', psifinal.dtype)
         #        self.analyze_psi_entropy(psifinal)
                 outfiles = map(lambda band: os.path.join(m.wfcdirectory, f"k0{nk_point}b0{band+initial_band}.wfc"), range(number_of_bands))
             
@@ -215,7 +207,7 @@ class WfcGenerator:
                         np.save(fich, psifinal[i * m.nr : (i + 1) * m.nr])
 
         finally:
-                # GUARANTEED cleanup, even if wfck2r crashes
+                # GUARANTEED cleanup
             try:
                 import shutil
                 shutil.rmtree(tmp_dir)
@@ -234,15 +226,11 @@ class WfcGenerator:
 
 
 
-
-
     def trunc_mantissa_float64_array(self, arr, keep_bits):
         """Keep only the top `keep_bits` mantissa bits in a float64 array."""
-        #a = np.asarray(arr, dtype=np.float64).ravel()  # ensure pure float64
         a = np.ascontiguousarray(arr, dtype=np.float64)
         print(a.dtype)
         bits = a.view(np.uint64)
-        #mantissa_mask = (1 << 52) - 1
         mantissa_mask = np.uint64((1 << 52) - 1)
         exponent_and_sign = bits & (~mantissa_mask)
         mantissa = bits & mantissa_mask
@@ -254,7 +242,6 @@ class WfcGenerator:
 
 
     # -------------------------
-    # Example usage: after you have psi as numpy array (complex64/complex128)
     # If psi is complex, analyze real and imag separately and report average
     def analyze_psi_entropy(self, psi: np.ndarray):
         print("=== Byte-level entropy ===")
@@ -265,14 +252,9 @@ class WfcGenerator:
 
 
 
-#    def _get_command(self, nk_point: int, initial_band: int, number_of_bands: int):
     def _get_command(self, nk_point, initial_band, number_of_bands, tmp_dir):
 #        mpi = "" if m.npr == 1 else f"mpirun -np {m.npr} "
         mpi = ""
-#        print('get_cmd', nk_point)
-        # Directory unique per process
-        #tmp_dir = f"/home/carolfsg/InSe1/tmp_rank{self.rank}"
-#        tmp_dir = f"{os.getcwd()}/tmp_nk{nk_point}"
         wfck_output_file = os.path.join(tmp_dir, "wfck2r.oct")
     
         command = f"""&inputpp prefix = '{m.prefix}',\
@@ -290,14 +272,6 @@ class WfcGenerator:
     
         return cmd
 
-
-#def wfck2r_static(nk_point, initial_band, number_of_bands):
- #   WfcGenerator()._wfck2r(nk_point, initial_band, number_of_bands)
-#if __name__ == "__main__":
- #   profile_file = "profile_output_wfc.prof"
-  #  cProfile.runctx("WfcGenerator().run()", globals(), locals(), filename="profile_output_wfc.prof")
-   # p = pstats.Stats("profile_output_wfc.prof")
-    #with open("profile_output_wfc.txt", "w") as f:
      #   p.strip_dirs().sort_stats(SortKey.CUMULATIVE).print_stats(f)
     #WfcGenerator().run()
 #MPI.Finalize()
