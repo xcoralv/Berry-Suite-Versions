@@ -1,4 +1,4 @@
-""" Module to include some commutators for condutivity calculations """
+""" Module to include some commutators for condutivity calculations | Used in shg"""
 import time
 from findiff import Gradient
 import numpy as np
