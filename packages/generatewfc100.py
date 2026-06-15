@@ -8,9 +8,7 @@ import numpy as np
 import cProfile
 from berry import log
 from multiprocessing import Pool
-from collections import Counter
 import math
-#from joblib import Parallel, delayed
 import bz2
 from tempfile import TemporaryDirectory
 
@@ -66,7 +64,7 @@ class WfcGenerator:
             self.logger.info("\n\tWill run for all k-points and bands")
             self.logger.info(f"\tThere are {m.nks} k-points and {m.nbnd} bands.\n")
             print("Task list:", [(nk, 0, m.nbnd) for nk in self.nk_points])
-            with Pool(processes = self.npr) as pool:
+            with (processes = self.npr) as pool:
                 results = pool.starmap(self._wfck2r, [(nk, 0, m.nbnd) for nk in self.nk_points])
                 total_compression_time = sum(results)
         else:
@@ -157,7 +155,7 @@ class WfcGenerator:
                     total_compression_time += dt
 
         finally:
-            # GUARANTEED cleanup, even if wfck2r crashes
+            # GUARANTEED cleanup
             try:
                 import shutil
                 shutil.rmtree(tmp_dir)
