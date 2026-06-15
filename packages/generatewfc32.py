@@ -99,11 +99,6 @@ class WfcGenerator:
                 self._wfck2r(self.nk_points, self.bands, 1)
 
         self.logger.info("\n\tRemoving temporary file 'tmp_rank{self.rank}'")
-        #os.system(f"rm {os.getcwd()}/tmp")
-        #os.remove(f"{os.getcwd()}/tmp_rank{rank}")
-        #self.logger.info(f"\tRemoving quantum expresso output file '{m.wfck2r}_rank{rank}'")
-        #os.remove(os.path.join(os.getcwd(), f"{m.wfck2r}_rank{rank}"))
-        #os.system(f"rm {os.path.join(os.getcwd(),m.wfck2r)}")
         os.system(f"rm -r {os.getcwd()}/tmp_rank{self.rank}/")
         self.logger.footer()
         
@@ -127,11 +122,6 @@ class WfcGenerator:
 
         # Runs the command
         output = subprocess.check_output(shell_cmd, shell=True, cwd = self.tmp_dir)
-        #output = subprocess.check_output(shell_cmd, shell=True, cwd = self.tmp_dir, env = os.environ.copy())
-        #print('length output', len(output))
-        #with open(os.path.join(self.tmp_dir, "tmp"), "r") as f:
-         #   log_contents = f.read()
-          #  self.logger.info(f"wfck2r.x output:\n{log_contents}")
 
         # Converts fortran complex numbers to numpy format
         out1 = (output.decode("utf-8")
@@ -201,45 +191,19 @@ class WfcGenerator:
                 psifinal += list(psi[i * m.nr : (i + 1) * m.nr] * np.exp(-1j * deltaphase[i]))
                 
             psifinal = np.array(psifinal)
-            #print(len(psifinal))
-            #print(len(psifinal[i * m.nr : (i + 1) * m.nr]))
-            #file_size = 0
-            #start_time = time.time()
+
             outfiles = map(lambda band: os.path.join(m.wfcdirectory, f"k0{nk_point}b0{band+initial_band}.wfc"), range(number_of_bands))
             
             for i, outfile in enumerate(outfiles):
                 with open(outfile, "wb") as fich:
                     np.save(fich, psifinal[i * m.nr : (i + 1) * m.nr])
             
-                #file_size1 = os.path.getsize(outfile)
-                #file_size += file_size1
-            #end_time = time.time()
-            #elapsed_time = end_time - start_time
-
-            #print("Size of the file:", file_size, "bytes")
-            #return [elapsed_time, file_size]
-
-#    def _get_command(self, nk_point: int, initial_band: int, number_of_bands: int):
-       # mpi = "" if m.npr == 1 else f"mpirun -np {m.npr} "
- #       mpi = ""
-  #      command =f"&inputpp prefix = '{m.prefix}',\
-   #                     outdir = '{m.outdir}',\
-    #                    first_k = {nk_point + 1},\
-     #                   last_k = {nk_point + 1},\
-      #                  first_band = {initial_band + 1},\
-       #                 last_band = {initial_band + number_of_bands},\
-        #                loctave = .true., /"
-    #    if m.noncolin:
-     #       return f'echo "{command}" | {mpi} wfck2rFR.x > tmp; tail -{m.nr * number_of_bands*2} {m.wfck2r}'
-      #  else:
-       #     return f'echo "{command}" | {mpi} wfck2r.x > tmp; tail -{m.nr * number_of_bands} {m.wfck2r}'
 
 
     def _get_command(self, nk_point: int, initial_band: int, number_of_bands: int):
 #        mpi = "" if m.npr == 1 else f"mpirun -np {m.npr} "
         mpi = ""
         # Directory unique per process
-        #tmp_dir = f"/home/carolfsg/InSe1/tmp_rank{self.rank}"
         tmp_dir = f"{os.getcwd()}/tmp_rank{self.rank}"
         wfck_output_file = f"{os.path.join(tmp_dir, 'wfck2r.oct')}"
     
@@ -257,30 +221,6 @@ class WfcGenerator:
             cmd = f'echo "{command}" | {mpi} wfck2r.x > {tmp_dir}/tmp; tail -{m.nr * number_of_bands} {wfck_output_file}'
     
         return cmd
-
-
-#    def _get_command(self, nk_point: int, initial_band: int, number_of_bands: int):
-       # mpi = "" if m.npr == 1 else f"mpirun -np {m.npr} "
- #       mpi = ""
-        # Directory unique per process
-  #      tmp_dir = f"/home/carolfsg/InSe1/tmp_rank{self.rank}"
-   #     wfck_output_file = os.path.join(tmp_dir, "wfck2r.oct")
-    
-    #    command = f&inputpp prefix = '{m.prefix}',\
-           #         outdir = '{m.outdir}',\
-            #        first_k = {nk_point + 1},\
-             #       last_k = {nk_point + 1},\
-              #      first_band = {initial_band + 1},\
-               #     last_band = {initial_band + number_of_bands},\
-                #    loctave = .true., /"""
-       # if m.noncolin:
-        #    cmd = f'echo "{command}" | {mpi} wfck2rFR.x > {tmp_dir}/tmp 2>&1'
-      #  else:
-       #     cmd = f'echo "{command}" | {mpi} wfck2r.x > {tmp_dir}/tmp 2>&1'
-       # return cmd
-
-
-
 
 
 if __name__ == "__main__":
