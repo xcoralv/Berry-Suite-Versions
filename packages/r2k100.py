@@ -1,0 +1,211 @@
+from multiprocessing import Pool, Array
+
+import os
+from time import time
+import ctypes
+import logging
+import sys
+from findiff import Gradient
+
+import numpy as np
+
+from berry import log
+
+try:
+    import berry._subroutines.loaddata as d
+    import berry._subroutines.loadmeta as m
+    from berry.compression_utils1 import load_bz2_npy, truncate_complex, save_bz2_npy, CompressionTimer
+    from berry.compression_utils2 import save_array, load_array
+except:
+    pass
+
+timer = CompressionTimer()
+total_decomp_time =0.0
+total_comp_time = 0.0
+
+def read_wfc_files(banda: int, npr: int) -> None:
+    global read_wfc_kp, total_decomp_time
+
+    # -----------------------------
+    # NEW: accumulate decompression locally
+    # -----------------------------
+    #total_decomp_time = 0.0
+
+    def read_wfc_kp(kp):
+        #nonlocal total_decomp_time
+        td = 0.0
+        if m.noncolin:
+            infile0  = f"{m.wfcdirectory}/k0{kp}b0{bandsfinal[kp, banda]}-0.wfc.bz2"
+            infile1  = f"{m.wfcdirectory}/k0{kp}b0{bandsfinal[kp, banda]}-1.wfc.bz2"
+            wfct_k0[:, kp], dt1 = load_bz2_npy(infile0)
+            wfct_k1[:, kp], dt2 = load_bz2_npy(infile1)
+            td += dt1 + dt2
+        else:
+            if signalfinal[kp, banda] == -1:
+                infile = f"{m.wfcdirectory}/k0{kp}b0{bandsfinal[kp, banda]}.wfc1"
+            else:
+                infile = f"{m.wfcdirectory}/k0{kp}b0{bandsfinal[kp, banda]}.wfc"
+
+            wfct_k[:, kp], dt = load_array(infile)
+            td += dt
+        return td
+    with Pool(min(10, npr)) as pool:
+        results = pool.map(read_wfc_kp, range(m.nks))
+    
+    total_decomp_time += sum(results)
+    #print('total decomp time:', total_decomp_time)
+
+    # -----------------------------
+    # ADD total decompression to timer
+    # -----------------------------
+    timer.add_decompression(total_decomp_time)
+
+
+def calculate_wfcpos(npr: int) -> np.ndarray:
+    global calculate_wfcpos_kp
+
+    def calculate_wfcpos_kp(kp):
+        if m.noncolin:
+            wfcpos0[kp] = d_phase[kp, d.ijltonk[:, :, 0]] * wfct_k0[kp, d.ijltonk[:, :, 0]]
+            wfcpos1[kp] = d_phase[kp, d.ijltonk[:, :, 0]] * wfct_k1[kp, d.ijltonk[:, :, 0]]
+        else:
+            wfcpos[kp] = d_phase[kp, d.ijltonk[:, :, 0]] * wfct_k[kp, d.ijltonk[:, :, 0]]
+            #print(sys.getsizeof(wfcpos))
+            #print(type(wfcpos))
+    with Pool(npr) as pool:
+        pool.map(calculate_wfcpos_kp, range(m.nr))
+
+
+def calculate_wfcgra(npr: int) -> np.ndarray:
+    global calculate_wfcgra_kp
+
+    def calculate_wfcgra_kp(kp):
+        if m.noncolin:
+            wfcgra0[kp] = grad(wfcpos0[kp])
+            wfcgra1[kp] = grad(wfcpos1[kp])
+
+        else:
+            wfcgra[kp] = grad(wfcpos[kp])
+
+    with Pool(npr) as pool:
+        pool.map(calculate_wfcgra_kp, range(m.nr))
+
+
+def r_to_k(banda: int, npr: int) -> None:
+    global total_comp_time
+    start = time()
+    read_wfc_files(banda, npr)
+    logger.debug(f"\twfc files read in {time() - start:.2f} seconds")
+
+    start = time()
+    calculate_wfcpos(npr)
+    logger.debug(f"\twfcpos{banda} calculated in {time() - start:.2f} seconds")
+
+    start = time()
+    calculate_wfcgra(npr)
+    logger.debug(f"\twfcgra{banda} calculated in {time() - start:.2f} seconds")
+
+    start = time()
+    #IDEA: Try saving this files into a folder in different chunks
+    if m.noncolin:
+        np.save(os.path.join(m.data_dir, f"wfcpos{banda}-0.npy"), wfcpos0)
+        np.save(os.path.join(m.data_dir, f"wfcpos{banda}-1.npy"), wfcpos1)
+        np.save(os.path.join(m.data_dir, f"wfcgra{banda}-0.npy"), wfcgra0)
+        np.save(os.path.join(m.data_dir, f"wfcgra{banda}-1.npy"), wfcgra1)
+    else:
+        dt1 = save_array(os.path.join(m.data_dir, f"wfcpos{banda}.npy"), truncate_complex(wfcpos))
+        dt2 = save_array(os.path.join(m.data_dir, f"wfcgra{banda}.npy"), truncate_complex(wfcgra))
+        timer.add_compression(dt1+dt2)
+        total_comp_time += dt1
+        total_comp_time += dt2
+        #print('total comp time:', total_comp_time)
+
+    logger.debug(f"\twfcpos{banda} and wfcgra{banda} saved in {time() - start:.2f} seconds\n")
+
+
+def run_r2k(max_band: int, npr: int = 1, min_band: int = 0, logger_name: str = "r2k", logger_level: int = logging.INFO, flush: bool = False):
+    if m.noncolin:
+        global grad, signalfinal, bandsfinal, wfct_k0, wfct_k1, wfcpos0, wfcpos1, wfcgra0, wfcgra1, logger, d_phase
+    else:
+        global grad, signalfinal, bandsfinal, wfct_k, wfcpos, wfcgra, logger, d_phase
+
+    logger = log(logger_name, "R2K", level=logger_level, flush=flush)
+
+    logger.header()
+
+    ###########################################################################
+    # 1. DEFINING THE CONSTANTS
+    ########################################################################### 
+
+    WFCT_K_SHAPE = (m.nr, m.nks)
+    WFCPOS_SHAPE = (m.nr, m.nkx, m.nky)
+    WFCGRA_SHAPE = (m.nr, 2, m.nkx, m.nky)
+
+    WFCT_K_SIZE = m.nr * m.nks
+    WFCPOS_SIZE = m.nr * m.nkx * m.nky
+    WFCGRA_SIZE = m.nr * 2 * m.nkx * m.nky
+
+    ###########################################################################
+    # 2. STDOUT THE PARAMETERS
+    ########################################################################### 
+    logger.info(f"\tUnique reference of run: {m.refname}")
+    logger.info(f"\tNumber of processors to use: {npr}")
+    logger.info(f"\tMinimum band: {min_band}")
+    logger.info(f"\tMaximum band: {max_band}")
+    logger.info(f"\tk-points step, dk: {m.step}")
+    logger.info(f"\tTotal number of k-points: {m.nks}")
+    logger.info(f"\tTotal number of points in real space: {m.nr}")
+    logger.info(f"\tNumber of k-points in each direction: {m.nkx} {m.nky} {m.nkz}")
+    logger.info(f"\tDirectory where the wfc are: {m.wfcdirectory}\n")
+
+    ###########################################################################
+    # 3. CREATE ALL THE ARRAYS AND GRADIENT
+    ###########################################################################
+    grad = Gradient(h=[m.step, m.step], acc=2)                                  # Defines gradient function in 2D
+    signalfinal = np.load(os.path.join(m.data_dir, "signalfinal.npy"))
+    bandsfinal = np.load(os.path.join(m.data_dir, "bandsfinal.npy"))
+    d_phase = np.load(os.path.join(m.data_dir, "phase.npy"))
+    logger.info(f"\tSignal and bands files loaded")
+    #print(sys.getsizeof(WFCGRA_SHAPE))
+    #print(type(WFCGRA_SHAPE))
+    if m.noncolin:
+        buffer = Array(ctypes.c_double, 2 * WFCT_K_SIZE, lock=False)
+        wfct_k0 = np.frombuffer(buffer, dtype=np.complex128).reshape(WFCT_K_SHAPE)
+        wfct_k1 = np.frombuffer(buffer, dtype=np.complex128).reshape(WFCT_K_SHAPE)
+
+        buffer = Array(ctypes.c_double, 2 * WFCPOS_SIZE, lock=False)
+        wfcpos0 = np.frombuffer(buffer, dtype=np.complex128).reshape(WFCPOS_SHAPE)
+        wfcpos1 = np.frombuffer(buffer, dtype=np.complex128).reshape(WFCPOS_SHAPE)
+
+        buffer = Array(ctypes.c_double, 2 * WFCGRA_SIZE, lock=False)
+        wfcgra0 = np.frombuffer(buffer, dtype=np.complex128).reshape(WFCGRA_SHAPE)
+        wfcgra1 = np.frombuffer(buffer, dtype=np.complex128).reshape(WFCGRA_SHAPE)
+
+    else:
+        buffer = Array(ctypes.c_double, 2 * WFCT_K_SIZE, lock=False)
+        wfct_k = np.frombuffer(buffer, dtype=np.complex128).reshape(WFCT_K_SHAPE)
+
+        buffer = Array(ctypes.c_double, 2 * WFCPOS_SIZE, lock=False)
+        wfcpos = np.frombuffer(buffer, dtype=np.complex128).reshape(WFCPOS_SHAPE)
+
+        buffer = Array(ctypes.c_double, 2 * WFCGRA_SIZE, lock=False)
+        wfcgra = np.frombuffer(buffer, dtype=np.complex128).reshape(WFCGRA_SHAPE)
+        #print(sys.getsizeof(buffer))
+        #print(type(buffer))
+
+    ###########################################################################
+    # 4. CALCULATE
+    ###########################################################################
+    for banda in range(min_band, max_band + 1):
+        r_to_k(banda, npr)
+
+    ###########################################################################
+    # Finished
+    ###########################################################################
+    print('total decomp time:', total_decomp_time)
+    print('total comp time:', total_comp_time)
+    logger.footer()
+
+if __name__ == "__main__":
+    run_r2k(9, log("r2k", "R2K", "version", logging.DEBUG), 20)
+    timer.report()
